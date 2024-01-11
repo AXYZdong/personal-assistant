@@ -14,11 +14,13 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.utils import logging
 
-from tools.transformers.interface import GenerationConfig, generate_interactive
+from interface import GenerationConfig, generate_interactive
+
+from modelscope import snapshot_download
 
 logger = logging.get_logger(__name__)
 
-from modelscope import snapshot_download
+
 model_id = 'yondong/personal-assistant'
 model_dir = snapshot_download(model_id)
 
