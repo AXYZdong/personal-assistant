@@ -8,7 +8,7 @@ model_id = 'yondong/personal-assistant'
 model_dir = snapshot_download(model_id)
 
 tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
-model = AutoModel.from_pretrained(model_dir, trust_remote_code=True)..to(torch.bfloat16).cuda()
+model = AutoModel.from_pretrained(model_dir, trust_remote_code=True).to(torch.bfloat16).cuda()
 model = model.eval()
 
 """Override Chatbot.postprocess"""
