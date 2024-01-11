@@ -1,17 +1,14 @@
 from transformers import AutoModel, AutoTokenizer
 import gradio as gr
 import mdtex2html
-from utils import load_model_on_gpus
+# from utils import load_model_on_gpus
 from modelscope import snapshot_download
 
 model_id = 'yondong/personal-assistant'
 model_dir = snapshot_download(model_id)
 
 tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
-model = AutoModel.from_pretrained(model_dir, trust_remote_code=True).cuda()
-# 多显卡支持，使用下面两行代替上面一行，将num_gpus改为你实际的显卡数量
-# from utils import load_model_on_gpus
-# model = load_model_on_gpus("THUDM/chatglm2-6b", num_gpus=2)
+model = AutoModel.from_pretrained(model_dir, trust_remote_code=True)..to(torch.bfloat16).cuda()
 model = model.eval()
 
 """Override Chatbot.postprocess"""
