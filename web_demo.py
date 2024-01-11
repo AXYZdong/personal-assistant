@@ -1,127 +1,112 @@
-"""
-This script refers to the dialogue example of streamlit, the interactive generation code of chatglm2 and transformers.
-We mainly modified part of the code logic to adapt to the generation of our model.
-Please refer to these links below for more information:
-    1. streamlit chat example: https://docs.streamlit.io/knowledge-base/tutorials/build-conversational-apps
-    2. chatglm2: https://github.com/THUDM/ChatGLM2-6B
-    3. transformers: https://github.com/huggingface/transformers
-"""
-
-from dataclasses import asdict
-
-import streamlit as st
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.utils import logging
-
-from interface import GenerationConfig, generate_interactive
-
+from transformers import AutoModel, AutoTokenizer
+import gradio as gr
+import mdtex2html
+from utils import load_model_on_gpus
 from modelscope import snapshot_download
-
-logger = logging.get_logger(__name__)
-
 
 model_id = 'yondong/personal-assistant'
 model_dir = snapshot_download(model_id)
 
-def on_btn_click():
-    del st.session_state.messages
+tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
+model = AutoModel.from_pretrained(model_dir, trust_remote_code=True).cuda()
+# 多显卡支持，使用下面两行代替上面一行，将num_gpus改为你实际的显卡数量
+# from utils import load_model_on_gpus
+# model = load_model_on_gpus("THUDM/chatglm2-6b", num_gpus=2)
+model = model.eval()
+
+"""Override Chatbot.postprocess"""
 
 
-@st.cache_resource
-def load_model():
-    model = (
-        AutoModelForCausalLM.from_pretrained(model_dir, trust_remote_code=True)
-        .to(torch.bfloat16)
-        .cuda()
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
-    return model, tokenizer
+def postprocess(self, y):
+    if y is None:
+        return []
+    for i, (message, response) in enumerate(y):
+        y[i] = (
+            None if message is None else mdtex2html.convert((message)),
+            None if response is None else mdtex2html.convert(response),
+        )
+    return y
 
 
-def prepare_generation_config():
-    with st.sidebar:
-        max_length = st.slider("Max Length", min_value=32, max_value=2048, value=2048)
-        top_p = st.slider("Top P", 0.0, 1.0, 0.8, step=0.01)
-        temperature = st.slider("Temperature", 0.0, 1.0, 0.7, step=0.01)
-        st.button("Clear Chat History", on_click=on_btn_click)
-
-    generation_config = GenerationConfig(max_length=max_length, top_p=top_p, temperature=temperature)
-
-    return generation_config
+gr.Chatbot.postprocess = postprocess
 
 
-user_prompt = "<|User|>:{user}\n"
-robot_prompt = "<|Bot|>:{robot}<eoa>\n"
-cur_query_prompt = "<|User|>:{user}<eoh>\n<|Bot|>:"
-
-
-def combine_history(prompt):
-    messages = st.session_state.messages
-    total_prompt = ""
-    for message in messages:
-        cur_content = message["content"]
-        if message["role"] == "user":
-            cur_prompt = user_prompt.replace("{user}", cur_content)
-        elif message["role"] == "robot":
-            cur_prompt = robot_prompt.replace("{robot}", cur_content)
+def parse_text(text):
+    """copy from https://github.com/GaiZhenbiao/ChuanhuChatGPT/"""
+    lines = text.split("\n")
+    lines = [line for line in lines if line != ""]
+    count = 0
+    for i, line in enumerate(lines):
+        if "```" in line:
+            count += 1
+            items = line.split('`')
+            if count % 2 == 1:
+                lines[i] = f'<pre><code class="language-{items[-1]}">'
+            else:
+                lines[i] = f'<br></code></pre>'
         else:
-            raise RuntimeError
-        total_prompt += cur_prompt
-    total_prompt = total_prompt + cur_query_prompt.replace("{user}", prompt)
-    return total_prompt
+            if i > 0:
+                if count % 2 == 1:
+                    line = line.replace("`", "\`")
+                    line = line.replace("<", "&lt;")
+                    line = line.replace(">", "&gt;")
+                    line = line.replace(" ", "&nbsp;")
+                    line = line.replace("*", "&ast;")
+                    line = line.replace("_", "&lowbar;")
+                    line = line.replace("-", "&#45;")
+                    line = line.replace(".", "&#46;")
+                    line = line.replace("!", "&#33;")
+                    line = line.replace("(", "&#40;")
+                    line = line.replace(")", "&#41;")
+                    line = line.replace("$", "&#36;")
+                lines[i] = "<br>"+line
+    text = "".join(lines)
+    return text
 
 
-def main():
-    # torch.cuda.empty_cache()
-    print("load model begin.")
-    model, tokenizer = load_model()
-    print("load model end.")
+def predict(input, chatbot, max_length, top_p, temperature, history, past_key_values):
+    chatbot.append((parse_text(input), ""))
+    for response, history, past_key_values in model.stream_chat(tokenizer, input, history, past_key_values=past_key_values,
+                                                                return_past_key_values=True,
+                                                                max_length=max_length, top_p=top_p,
+                                                                temperature=temperature):
+        chatbot[-1] = (parse_text(input), parse_text(response))
 
-    user_avator = "user.png"
-    robot_avator = "axyzdong.png"
-
-    # user_avator = "doc/imgs/user.png"
-    # robot_avator = "doc/imgs/axyzdong.png"
-
-    st.title("InternLM-Chat-7B for axyzdong")
-
-    generation_config = prepare_generation_config()
-
-    # Initialize chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    # Display chat messages from history on app rerun
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"], avatar=message.get("avatar")):
-            st.markdown(message["content"])
-
-    # Accept user input
-    if prompt := st.chat_input("What is up?"):
-        # Display user message in chat message container
-        with st.chat_message("user", avatar=user_avator):
-            st.markdown(prompt)
-        real_prompt = combine_history(prompt)
-        # Add user message to chat history
-        st.session_state.messages.append({"role": "user", "content": prompt, "avatar": user_avator})
-
-        with st.chat_message("robot", avatar=robot_avator):
-            message_placeholder = st.empty()
-            for cur_response in generate_interactive(
-                model=model,
-                tokenizer=tokenizer,
-                prompt=real_prompt,
-                additional_eos_token_id=103028,
-                **asdict(generation_config),
-            ):
-                # Display robot response in chat message container
-                message_placeholder.markdown(cur_response + "▌")
-            message_placeholder.markdown(cur_response)
-        # Add robot response to chat history
-        st.session_state.messages.append({"role": "robot", "content": cur_response, "avatar": robot_avator})
-        torch.cuda.empty_cache()
+        yield chatbot, history, past_key_values
 
 
-if __name__ == "__main__":
-    main()
+def reset_user_input():
+    return gr.update(value='')
+
+
+def reset_state():
+    return [], [], None
+
+
+with gr.Blocks() as demo:
+    gr.HTML("""<h1 align="center">ChatGLM2-6B</h1>""")
+
+    chatbot = gr.Chatbot()
+    with gr.Row():
+        with gr.Column(scale=4):
+            with gr.Column(scale=12):
+                user_input = gr.Textbox(show_label=False, placeholder="Input...", lines=10).style(
+                    container=False)
+            with gr.Column(min_width=32, scale=1):
+                submitBtn = gr.Button("Submit", variant="primary")
+        with gr.Column(scale=1):
+            emptyBtn = gr.Button("Clear History")
+            max_length = gr.Slider(0, 32768, value=8192, step=1.0, label="Maximum length", interactive=True)
+            top_p = gr.Slider(0, 1, value=0.8, step=0.01, label="Top P", interactive=True)
+            temperature = gr.Slider(0, 1, value=0.95, step=0.01, label="Temperature", interactive=True)
+
+    history = gr.State([])
+    past_key_values = gr.State(None)
+
+    submitBtn.click(predict, [user_input, chatbot, max_length, top_p, temperature, history, past_key_values],
+                    [chatbot, history, past_key_values], show_progress=True)
+    submitBtn.click(reset_user_input, [], [user_input])
+
+    emptyBtn.click(reset_state, outputs=[chatbot, history, past_key_values], show_progress=True)
+
+demo.queue().launch(share=False, inbrowser=True)
