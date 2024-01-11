@@ -18,6 +18,9 @@ from tools.transformers.interface import GenerationConfig, generate_interactive
 
 logger = logging.get_logger(__name__)
 
+from modelscope import snapshot_download
+model_id = 'yondong/personal-assistant'
+model_dir = snapshot_download(model_id)
 
 def on_btn_click():
     del st.session_state.messages
@@ -26,11 +29,11 @@ def on_btn_click():
 @st.cache_resource
 def load_model():
     model = (
-        AutoModelForCausalLM.from_pretrained("/root/personal_assistant/work_dirs/hf_merge", trust_remote_code=True)
+        AutoModelForCausalLM.from_pretrained(model_dir, trust_remote_code=True)
         .to(torch.bfloat16)
         .cuda()
     )
-    tokenizer = AutoTokenizer.from_pretrained("/root/personal_assistant/work_dirs/hf_merge", trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_dir, trust_remote_code=True)
     return model, tokenizer
 
 
@@ -73,8 +76,8 @@ def main():
     model, tokenizer = load_model()
     print("load model end.")
 
-    user_avator = "/root/data/InternLM/doc/imgs/user.png"
-    robot_avator = "/root/data/InternLM/doc/imgs/axyzdong.png"
+    user_avator = "user.png"
+    robot_avator = "axyzdong.png"
 
     # user_avator = "doc/imgs/user.png"
     # robot_avator = "doc/imgs/axyzdong.png"
