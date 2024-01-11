@@ -1,6 +1,7 @@
 from transformers import AutoModel, AutoTokenizer
 import gradio as gr
 import mdtex2html
+import torch
 # from utils import load_model_on_gpus
 from modelscope import snapshot_download
 
